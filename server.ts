@@ -36,7 +36,7 @@ async function startServer() {
 
   const crmLeads: any[] = [];
   const analyticsEvents: any[] = [];
-  const sessions: Record<string, { step?: string; data?: any }> = {};
+  const sessions: Record<string, { step?: string; data?: any; lastProductId?: string }> = {};
 
   // --- API Routes ---
   
@@ -90,6 +90,7 @@ async function startServer() {
       if (botResponse.productId) {
         const product = inventory.find(p => p.id === botResponse.productId || p.id === `PROD-${botResponse.productId}`);
         if (product) {
+          sessions[sessionId] = { ...sessions[sessionId], lastProductId: product.id };
           reply = `✨ *Product Details: ${product.name}*\n\n` +
                   `💰 Price: *${product.price}*\n` +
                   `📦 Stock: *${product.stock} units*\n` +
@@ -100,6 +101,23 @@ async function startServer() {
         }
       } 
       
+      // Handle "Add to Cart" specifically
+      if (message.toLowerCase() === "add to cart") {
+        const lastProductId = sessions[sessionId]?.lastProductId;
+        if (lastProductId) {
+          const product = inventory.find(p => p.id === lastProductId);
+          if (product) {
+            botResponse.intent = "SALES";
+            botResponse.cartUpdate = { product, quantity: 1 };
+            reply = `🛒 *Added to Cart!*\n\n*${product.name}* has been added to your cart. 🛍️`;
+            actions = ["View Cart", "Checkout", "Continue Shopping"];
+          }
+        } else {
+          reply = "Which product would you like to add to your cart? Please browse the catalog first. 📂";
+          actions = ["Browse Catalog", "Main Menu"];
+        }
+      }
+
       // Handle category browsing
       if (!reply && botResponse.intent === "CATALOG") {
         const categoryMatch = categories.find(c => message.toLowerCase().includes(c.toLowerCase()));

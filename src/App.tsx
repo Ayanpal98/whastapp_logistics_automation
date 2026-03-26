@@ -25,7 +25,8 @@ import {
   X,
   Info,
   ExternalLink,
-  Activity
+  Activity,
+  ShoppingCart
 } from 'lucide-react';
 import { GoogleGenAI } from "@google/genai";
 
@@ -392,6 +393,7 @@ export default function App() {
   const [showAdmin, setShowAdmin] = useState(false);
   const [activeNodeIds, setActiveNodeIds] = useState<string[]>([]);
   const [currentSystemNode, setCurrentSystemNode] = useState<string | null>(null);
+  const [cart, setCart] = useState<{ product: any; quantity: number }[]>([]);
 
   const highlightNodes = async (ids: string[], duration = 1000) => {
     // Sequential highlighting to simulate data flow
@@ -541,6 +543,21 @@ export default function App() {
       });
       const data = await response.json();
       
+      // Handle Cart Updates
+      if (data.cartUpdate) {
+        setCart(prev => {
+          const existing = prev.find(item => item.product.id === data.cartUpdate.product.id);
+          if (existing) {
+            return prev.map(item => 
+              item.product.id === data.cartUpdate.product.id 
+                ? { ...item, quantity: item.quantity + data.cartUpdate.quantity } 
+                : item
+            );
+          }
+          return [...prev, data.cartUpdate];
+        });
+      }
+      
       setMessages(prev => [...prev, { 
         text: data.reply, 
         sender: 'bot', 
@@ -639,6 +656,49 @@ export default function App() {
             <Database className="w-4 h-4" />
             {showAdmin ? 'CLOSE ADMIN' : 'INFRASTRUCTURE'}
           </button>
+
+          <div className="relative group">
+            <button className="p-2 bg-gray-100 text-gray-600 rounded-full hover:bg-gray-200 transition-all relative">
+              <ShoppingCart className="w-5 h-5" />
+              {cart.length > 0 && (
+                <span className="absolute -top-1 -right-1 bg-red-600 text-white text-[10px] font-black w-4 h-4 rounded-full flex items-center justify-center animate-bounce">
+                  {cart.reduce((acc, item) => acc + item.quantity, 0)}
+                </span>
+              )}
+            </button>
+            
+            {/* Cart Dropdown (Simple) */}
+            <div className="absolute top-full right-0 mt-2 w-64 bg-white rounded-xl shadow-2xl border border-gray-100 p-4 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50">
+              <h4 className="text-xs font-black uppercase tracking-widest mb-3 border-b border-gray-50 pb-2">Your Cart</h4>
+              {cart.length === 0 ? (
+                <p className="text-[10px] text-gray-400 italic">Your cart is empty.</p>
+              ) : (
+                <div className="space-y-3 max-h-48 overflow-y-auto">
+                  {cart.map((item, i) => (
+                    <div key={i} className="flex justify-between items-center text-[10px]">
+                      <div className="flex-1 pr-2">
+                        <p className="font-bold text-gray-800 truncate">{item.product.name}</p>
+                        <p className="text-gray-400">Qty: {item.quantity} × {item.product.price}</p>
+                      </div>
+                      <button 
+                        onClick={() => setCart(prev => prev.filter(p => p.product.id !== item.product.id))}
+                        className="text-red-400 hover:text-red-600"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    </div>
+                  ))}
+                  <div className="pt-2 border-t border-gray-50 flex justify-between items-center font-black">
+                    <span className="text-[10px]">Total Items:</span>
+                    <span className="text-indigo-600">{cart.reduce((acc, item) => acc + item.quantity, 0)}</span>
+                  </div>
+                  <button className="w-full py-2 bg-emerald-600 text-white rounded-lg text-[10px] font-black hover:bg-emerald-700 transition-colors mt-2">
+                    CHECKOUT NOW
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
         </div>
       </header>
 
