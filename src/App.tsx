@@ -412,18 +412,29 @@ export default function App() {
   const processMessageWithAI = async (text: string) => {
     await highlightNodes(['gateway', 'middleware', 'nlp-layer', 'platform-layer']);
     const apiKey = (process.env.GEMINI_API_KEY as string);
+    const lowerText = text.toLowerCase();
+    
+    // Improved product ID extraction (looking for PROD-XXXX or 4-digit numbers)
+    const idMatch = text.match(/PROD-(\d{4})/i) || text.match(/\b(10\d{2})\b/);
+    const productId = idMatch ? `PROD-${idMatch[1]}` : null;
+
     if (!apiKey || apiKey === "MY_GEMINI_API_KEY") {
       // Fallback logic if API key is missing
-      const lowerText = text.toLowerCase();
-      if (lowerText.includes("track") || lowerText.includes("ord-")) return { intent: "TRACKING", reply: "Let's track your order! 📦", suggestedActions: ["ORD-123", "ORD-456"] };
-      if (lowerText.includes("delivery") || lowerText.includes("status")) return { intent: "DELIVERY_STATUS", reply: "Checking your delivery status... 🚚", suggestedActions: ["ORD-123", "ORD-456"] };
-      if (lowerText.includes("update") || lowerText.includes("new")) return { intent: "PRODUCT_UPDATE", reply: "Here are the latest product updates! 🔔", suggestedActions: ["Notify Me", "Pre-order Solar"] };
-      if (lowerText.includes("catalog") || lowerText.includes("browse") || lowerText.includes("product")) return { intent: "CATALOG", reply: "Browsing our catalog... 📂", suggestedActions: ["Electronics", "Apparel", "Home"] };
+      if (lowerText.includes("track") || lowerText.includes("ord-")) return { intent: "TRACKING", reply: "Let's track your order! 📦", suggestedActions: ["ORD-123", "ORD-456", "Main Menu"] };
+      if (lowerText.includes("delivery") || lowerText.includes("status")) return { intent: "DELIVERY_STATUS", reply: "Checking your delivery status... 🚚", suggestedActions: ["ORD-123", "ORD-456", "Main Menu"] };
+      if (lowerText.includes("update") || lowerText.includes("new")) return { intent: "PRODUCT_UPDATE", reply: "Here are the latest product updates! 🔔", suggestedActions: ["Notify Me", "Pre-order Solar", "Main Menu"] };
+      
+      if (lowerText.includes("details") && productId) return { intent: "SALES", productId, reply: `Fetching details for ${productId}...`, suggestedActions: [`Add to Cart ${idMatch![1]}`, "Back to Catalog", "Main Menu"] };
+      if ((lowerText.includes("add to cart") || lowerText.includes("buy")) && productId) return { intent: "SALES", productId, reply: `Adding ${productId} to cart...`, suggestedActions: ["View Cart", "Checkout", "Main Menu"] };
+      
+      if (lowerText.includes("catalog") || lowerText.includes("browse") || lowerText.includes("product")) return { intent: "CATALOG", reply: "Browsing our catalog... 📂", suggestedActions: ["Electronics", "Apparel", "Home", "Main Menu"] };
+      if (lowerText.includes("add to cart") || lowerText.includes("buy")) return { intent: "SALES", reply: "Adding to cart...", suggestedActions: ["View Cart", "Checkout", "Main Menu"] };
+      if (lowerText.includes("checkout") || lowerText.includes("pay")) return { intent: "SALES", reply: "Proceeding to checkout...", suggestedActions: ["Confirm Checkout", "View Cart", "Main Menu"] };
       
       return { 
         intent: "GENERAL", 
-        reply: "Welcome! How can I help you today? Please choose an option below:",
-        suggestedActions: ["Product Updates", "Track Order", "Delivery Status", "Browse Catalog"]
+        reply: "👋 *Welcome to our Automated Shopping Assistant!*\n\nI can help you browse products, add them to your cart, and track your deliveries directly here on WhatsApp.\n\nWhat would you like to do?",
+        suggestedActions: ["Browse Catalog", "Track Order", "View Cart", "Product Updates"]
       };
     }
 
@@ -431,20 +442,23 @@ export default function App() {
     const model = "gemini-3-flash-preview";
     
     const systemInstruction = `
-      You are a highly sophisticated WhatsApp Business Assistant.
+      You are a highly sophisticated WhatsApp Business Assistant for a major retail brand.
+      Your goal is to guide users through the entire shopping journey: Discovery -> Selection -> Purchase -> Tracking.
+      
       Intents: TRACKING, SALES, PROMOTION, CATALOG, CHATBOT_FLOW, HUMAN_HANDOFF, PRODUCT_UPDATE, DELIVERY_STATUS, GENERAL.
       
       Inventory Context: We have 1000 items from brands like TechNova, EcoStyle, LuxeGear, SwiftRun, PureSound.
       Categories: Electronics, Apparel, Home, Sports, Audio.
       
       Rules:
-      - If user wants to "Browse Catalog" or see products, use intent CATALOG.
-      - If user asks for "Product Updates", use intent PRODUCT_UPDATE.
-      - If user asks for "Delivery Status", use intent DELIVERY_STATUS.
-      - If user asks for "Details" of a specific product ID (e.g. PROD-1005), use intent SALES and include the ID.
-      - If intent is CATALOG, suggest categories: Electronics, Apparel, Home, Sports, Audio.
+      - ALWAYS be professional, helpful, and use emojis to feel like a modern WhatsApp bot.
+      - Discovery: If user wants to "Browse Catalog" or see products, use CATALOG intent. Suggest categories.
+      - Selection: If user asks for "Details" of a specific product ID (e.g. 1005), use SALES intent and include the ID as "1005".
+      - Purchase: If user says "Add to Cart" or "Buy [Product]", use SALES intent.
+      - Checkout: If user says "Checkout" or "Ready to pay", use SALES intent.
+      - Tracking: If user asks for "Delivery Status" or "Track Order", use TRACKING/DELIVERY_STATUS intent.
       - If user provides contact info (email/phone), flag it for CRM.
-      - If the user's intent is unclear, ask them to choose from: Product Updates, Track Order, Delivery Status, or Browse Catalog.
+      - If the user's intent is unclear, offer a menu: Browse Catalog, Track Order, View Cart, Product Updates.
       
       Return JSON: { "intent": "...", "reply": "...", "suggestedActions": [...], "crmUpdate": { "name": "...", "email": "..." }, "productId": "..." }
     `;
@@ -523,6 +537,18 @@ export default function App() {
     }, 1500);
   };
 
+  const handleCheckout = () => {
+    if (cart.length === 0) return;
+    setCart([]);
+    setMessages(prev => [...prev, { 
+      text: "🎉 *Order Placed Successfully!*\n\nThank you for your purchase. Your order is being processed and you will receive a tracking ID shortly. 🚀", 
+      sender: 'bot', 
+      timestamp: new Date(),
+      actions: ["Track Order", "Browse Catalog", "Main Menu"]
+    }]);
+    if (!showChat) setShowChat(true);
+  };
+
   const handleSendMessage = async (text: string) => {
     if (!text.trim()) return;
 
@@ -539,7 +565,7 @@ export default function App() {
       const response = await fetch('/api/webhook', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: userMsg, sender: 'User-1', botResponse })
+        body: JSON.stringify({ message: userMsg, sender: 'User-1', botResponse, cart })
       });
       const data = await response.json();
       
@@ -556,6 +582,11 @@ export default function App() {
           }
           return [...prev, data.cartUpdate];
         });
+      }
+
+      if (userMsg.toLowerCase() === 'checkout' || userMsg.toLowerCase() === 'confirm checkout') {
+        handleCheckout();
+        return;
       }
       
       setMessages(prev => [...prev, { 
@@ -668,31 +699,49 @@ export default function App() {
             </button>
             
             {/* Cart Dropdown (Simple) */}
-            <div className="absolute top-full right-0 mt-2 w-64 bg-white rounded-xl shadow-2xl border border-gray-100 p-4 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50">
+            <div className="absolute top-full right-0 mt-2 w-72 bg-white rounded-xl shadow-2xl border border-gray-100 p-4 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50">
               <h4 className="text-xs font-black uppercase tracking-widest mb-3 border-b border-gray-50 pb-2">Your Cart</h4>
               {cart.length === 0 ? (
                 <p className="text-[10px] text-gray-400 italic">Your cart is empty.</p>
               ) : (
-                <div className="space-y-3 max-h-48 overflow-y-auto">
-                  {cart.map((item, i) => (
-                    <div key={i} className="flex justify-between items-center text-[10px]">
-                      <div className="flex-1 pr-2">
-                        <p className="font-bold text-gray-800 truncate">{item.product.name}</p>
-                        <p className="text-gray-400">Qty: {item.quantity} × {item.product.price}</p>
+                <div className="space-y-3 max-h-64 overflow-y-auto">
+                  {cart.map((item, i) => {
+                    const price = parseFloat(item.product.price.replace('$', ''));
+                    const subtotal = price * item.quantity;
+                    return (
+                      <div key={i} className="flex justify-between items-start text-[10px] border-b border-gray-50 pb-2 last:border-0">
+                        <div className="flex-1 pr-2">
+                          <p className="font-bold text-gray-800 truncate">{item.product.name}</p>
+                          <p className="text-gray-400">
+                            {item.quantity} × {item.product.price}
+                            <span className="ml-2 font-bold text-indigo-600">Subtotal: ${subtotal.toFixed(2)}</span>
+                          </p>
+                        </div>
+                        <button 
+                          onClick={() => setCart(prev => prev.filter(p => p.product.id !== item.product.id))}
+                          className="text-red-400 hover:text-red-600 p-1"
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
                       </div>
-                      <button 
-                        onClick={() => setCart(prev => prev.filter(p => p.product.id !== item.product.id))}
-                        className="text-red-400 hover:text-red-600"
-                      >
-                        <X className="w-3 h-3" />
-                      </button>
+                    );
+                  })}
+                  <div className="pt-2 border-t border-gray-100 space-y-1">
+                    <div className="flex justify-between items-center text-[10px]">
+                      <span className="text-gray-400 uppercase font-bold">Total Items:</span>
+                      <span className="font-black">{cart.reduce((acc, item) => acc + item.quantity, 0)}</span>
                     </div>
-                  ))}
-                  <div className="pt-2 border-t border-gray-50 flex justify-between items-center font-black">
-                    <span className="text-[10px]">Total Items:</span>
-                    <span className="text-indigo-600">{cart.reduce((acc, item) => acc + item.quantity, 0)}</span>
+                    <div className="flex justify-between items-center text-xs font-black">
+                      <span className="text-gray-800 uppercase">Cart Total:</span>
+                      <span className="text-emerald-600">
+                        ${cart.reduce((acc, item) => acc + (parseFloat(item.product.price.replace('$', '')) * item.quantity), 0).toFixed(2)}
+                      </span>
+                    </div>
                   </div>
-                  <button className="w-full py-2 bg-emerald-600 text-white rounded-lg text-[10px] font-black hover:bg-emerald-700 transition-colors mt-2">
+                  <button 
+                    onClick={handleCheckout}
+                    className="w-full py-2 bg-emerald-600 text-white rounded-lg text-[10px] font-black hover:bg-emerald-700 transition-colors mt-2"
+                  >
                     CHECKOUT NOW
                   </button>
                 </div>
@@ -894,7 +943,7 @@ export default function App() {
             initial={{ x: '100%' }}
             animate={{ x: 0 }}
             exit={{ x: '100%' }}
-            className="fixed top-20 right-0 bottom-0 w-full md:w-[400px] bg-[#e5ddd5] z-30 shadow-2xl flex flex-col"
+            className="fixed top-20 right-0 bottom-16 w-full md:w-[400px] bg-[#e5ddd5] z-[60] shadow-2xl flex flex-col rounded-l-2xl overflow-hidden"
           >
             {/* WhatsApp Header */}
             <div className="bg-[#075e54] p-4 flex items-center justify-between text-white">
@@ -973,7 +1022,7 @@ export default function App() {
                 e.preventDefault();
                 handleSendMessage(inputValue);
               }} 
-              className="p-3 bg-[#f0f0f0] flex items-center gap-2"
+              className="p-3 pb-6 bg-[#f0f0f0] flex items-center gap-2"
             >
               <input 
                 type="text"
@@ -1156,7 +1205,7 @@ export default function App() {
       </AnimatePresence>
 
       {/* Legend Footer */}
-      <footer className="fixed bottom-0 left-0 right-0 bg-white/80 backdrop-blur-md border-t border-gray-100 px-8 py-4 flex flex-wrap justify-center gap-8 z-40">
+      <footer className="fixed bottom-0 left-0 right-0 bg-white/80 backdrop-blur-md border-t border-gray-100 px-8 py-4 flex flex-wrap justify-center gap-8 z-10">
         <div className="flex items-center gap-2">
           <div className="w-3 h-3 rounded-full bg-blue-600" />
           <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Tracking</span>
