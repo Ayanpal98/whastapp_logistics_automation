@@ -1,10 +1,11 @@
+import dotenv from "dotenv";
+dotenv.config();
+
 import express from "express";
 import { createServer as createViteServer } from "vite";
 import path from "path";
 import { GoogleGenAI } from "@google/genai";
-import dotenv from "dotenv";
-
-dotenv.config();
+import { googleSheets } from "./googleSheets.js";
 
 async function startServer() {
   const app = express();
@@ -12,43 +13,24 @@ async function startServer() {
 
   app.use(express.json());
 
-  // --- Mock Database / State ---
-  const orders = [
-    { 
-      id: "ORD-123", 
-      status: "Shipped", 
-      deliveryDate: "2026-03-28",
-      trackingUrl: "https://track.example.com/ORD-123",
-      items: [
-        { name: "TechNova Pro Max", quantity: 1 },
-        { name: "PureSound Noise Cancel 2", quantity: 2 }
-      ],
-      updates: [
-        { date: "2026-03-25", status: "Order Processed", location: "Warehouse A" },
-        { date: "2026-03-26", status: "Shipped", location: "Transit Hub" }
-      ]
-    },
-    { 
-      id: "ORD-456", 
-      status: "Out for Delivery", 
-      deliveryDate: "2026-03-26",
-      trackingUrl: "https://track.example.com/ORD-456",
-      items: [
-        { name: "EcoStyle Solar Watch", quantity: 1 }
-      ],
-      updates: [
-        { date: "2026-03-24", status: "Order Processed", location: "Warehouse B" },
-        { date: "2026-03-25", status: "Shipped", location: "Regional Center" },
-        { date: "2026-03-26", status: "Out for Delivery", location: "Your City" }
-      ]
-    },
-  ];
+  // --- CRM Data (Google Sheets Integration) ---
+  let orders: any[] = [];
+  let promotions: any[] = [];
+  let customers: any[] = [];
 
-  const promotions = [
-    { code: "WELCOME10", discount: "10% Off", description: "First order special", expiry: "2026-12-31" },
-    { code: "TECH20", discount: "20% Off", description: "Electronics flash sale", expiry: "2026-04-15" },
-    { code: "FREESHIP", discount: "Free Shipping", description: "Orders over $100", expiry: "2026-06-30" }
-  ];
+  const syncCrmData = async () => {
+    try {
+      orders = await googleSheets.getOrders();
+      promotions = await googleSheets.getPromotions();
+      customers = await googleSheets.getCustomers();
+      console.log(`CRM Data Synced: ${orders.length} orders, ${promotions.length} promotions, ${customers.length} customers`);
+    } catch (e) {
+      console.error("Sync Error:", e);
+    }
+  };
+
+  // Initial Sync
+  syncCrmData();
 
   // Generate 1000 products for testing
   const brands = ["TechNova", "EcoStyle", "LuxeGear", "SwiftRun", "PureSound"];
@@ -72,6 +54,15 @@ async function startServer() {
 
   // --- API Routes ---
   
+  app.get("/api/products/:id", (req, res) => {
+    const product = inventory.find(p => p.id === req.params.id);
+    if (product) {
+      res.json(product);
+    } else {
+      res.status(404).json({ error: "Product not found" });
+    }
+  });
+
   app.post("/api/webhook", async (req, res) => {
     const { message, sender, botResponse: initialBotResponse } = req.body;
     const sessionId = sender;
@@ -79,8 +70,32 @@ async function startServer() {
     // 1. Automation Middleware: Logging & Pre-processing
     analyticsEvents.push({ type: 'message_received', timestamp: new Date(), sender });
 
+    // --- CRM Integration: Recognize User ---
+    const existingCustomer = customers.find(c => c.phone === sender || c.email === sender);
+    if (existingCustomer && !initialBotResponse) {
+      console.log(`Recognized Customer: ${existingCustomer.name}`);
+      // We can pass this info to the AI if we were calling it here, 
+      // but the AI call is on the frontend. 
+      // For now, let's just ensure the backend logic can use it.
+    }
+
     // 2. NLP Layer: Use the response processed by the frontend
     const botResponse = initialBotResponse || { intent: "GENERAL", reply: "I'm processing your request...", suggestedActions: [] };
+
+    // --- CRM Integration: Two-Way Sync ---
+    if (botResponse.crmUpdate) {
+      const updateData = botResponse.crmUpdate;
+      // Ensure we have an email to identify the customer
+      if (updateData.email) {
+        await googleSheets.updateCustomer({
+          ...updateData,
+          phone: updateData.phone || sender // Use sender as phone if not provided
+        });
+        // Re-sync local data after update
+        await syncCrmData();
+        botResponse.reply += "\n\n✅ *Profile Updated*: Your information has been synchronized with our CRM.";
+      }
+    }
 
     // 2.5 GLOBAL OVERRIDES (Add to Cart, View Cart, Checkout, Catalog, Promotions)
     const lowerMsg = message.toLowerCase();
@@ -288,8 +303,18 @@ async function startServer() {
       leads: crmLeads, 
       analytics: analyticsEvents.slice(-20),
       inventoryCount: inventory.length,
-      activeSessions: Object.keys(sessions).length
+      activeSessions: Object.keys(sessions).length,
+      crmStatus: process.env.GOOGLE_SHEETS_SPREADSHEET_ID ? "Connected (Google Sheets)" : "Mock Mode",
+      ordersCount: orders.length,
+      promotionsCount: promotions.length,
+      customersCount: customers.length,
+      customers: customers.slice(0, 10) // Send a sample for the UI
     });
+  });
+
+  app.post("/api/admin/sync", async (req, res) => {
+    await syncCrmData();
+    res.json({ success: true, orders, promotions });
   });
 
   // Health check

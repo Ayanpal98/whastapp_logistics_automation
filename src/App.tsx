@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   MessageSquare, 
@@ -26,7 +26,20 @@ import {
   Info,
   ExternalLink,
   Activity,
-  ShoppingCart
+  ShoppingCart,
+  RefreshCw,
+  Search,
+  MoreVertical,
+  Maximize2,
+  Minimize2,
+  Plus,
+  Smile,
+  Send,
+  Check,
+  CheckCheck,
+  Paperclip,
+  Mic,
+  Image as ImageIcon
 } from 'lucide-react';
 import { GoogleGenAI } from "@google/genai";
 
@@ -369,12 +382,66 @@ const Arrow = ({ direction = 'down', className = '' }: { direction?: 'down' | 'r
   );
 };
 
+const ProductCard = ({ productId }: { productId: string }) => {
+  const [product, setProduct] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const fetchProduct = async () => {
+      try {
+        const res = await fetch(`/api/products/${productId}`);
+        const data = await res.json();
+        setProduct(data);
+      } catch (e) {
+        console.error(e);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchProduct();
+  }, [productId]);
+
+  if (loading) return (
+    <div className="w-64 h-32 bg-white rounded-xl shadow-sm animate-pulse flex items-center justify-center">
+      <RefreshCw className="w-5 h-5 text-gray-300 animate-spin" />
+    </div>
+  );
+
+  if (!product || product.error) return null;
+
+  return (
+    <motion.div 
+      initial={{ opacity: 0, scale: 0.9 }}
+      animate={{ opacity: 1, scale: 1 }}
+      className="w-64 bg-white rounded-xl shadow-lg overflow-hidden border border-gray-100 mt-2"
+    >
+      <div className="h-32 bg-gray-100 flex items-center justify-center relative">
+        <ImageIcon className="w-10 h-10 text-gray-300" />
+        <div className="absolute top-2 right-2 px-2 py-1 bg-emerald-500 text-white text-[8px] font-black rounded uppercase">
+          In Stock
+        </div>
+      </div>
+      <div className="p-3">
+        <p className="text-[8px] font-black text-emerald-600 uppercase tracking-widest mb-1">{product.brand}</p>
+        <h5 className="text-xs font-bold text-gray-800 mb-1 truncate">{product.name}</h5>
+        <div className="flex justify-between items-center">
+          <span className="text-sm font-black text-gray-900">{product.price}</span>
+          <button className="p-1.5 bg-gray-900 text-white rounded-lg hover:bg-black transition-colors">
+            <ShoppingCart className="w-3 h-3" />
+          </button>
+        </div>
+      </div>
+    </motion.div>
+  );
+};
+
 export default function App() {
   const [selectedNode, setSelectedNode] = useState<NodeData | null>(null);
   const [activeTrack, setActiveTrack] = useState<Track>('all');
   const [simulationActive, setSimulationActive] = useState(false);
   const [showChat, setShowChat] = useState(false);
-  const [messages, setMessages] = useState<{ text: string; sender: 'user' | 'bot'; timestamp: Date; actions?: string[] }[]>([
+  const [isMaximized, setIsMaximized] = useState(false);
+  const [messages, setMessages] = useState<{ text: string; sender: 'user' | 'bot'; timestamp: Date; actions?: string[]; productId?: string }[]>([
     { 
       text: "Hi! I'm your WhatsApp Assistant. How can I help you today? 🤖\n\nYou can choose from the options below:", 
       sender: 'bot', 
@@ -384,7 +451,17 @@ export default function App() {
   ]);
   const [inputValue, setInputValue] = useState('');
   const [isTyping, setIsTyping] = useState(false);
-  const [adminData, setAdminData] = useState<{ leads: any[]; analytics: any[]; inventoryCount: number; activeSessions: number }>({ 
+  const [adminData, setAdminData] = useState<{ 
+    leads: any[]; 
+    analytics: any[]; 
+    inventoryCount: number; 
+    activeSessions: number;
+    crmStatus?: string;
+    ordersCount?: number;
+    promotionsCount?: number;
+    customersCount?: number;
+    customers?: any[];
+  }>({ 
     leads: [], 
     analytics: [], 
     inventoryCount: 0, 
@@ -394,6 +471,15 @@ export default function App() {
   const [activeNodeIds, setActiveNodeIds] = useState<string[]>([]);
   const [currentSystemNode, setCurrentSystemNode] = useState<string | null>(null);
   const [cart, setCart] = useState<{ product: any; quantity: number }[]>([]);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  };
+
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages, isTyping]);
 
   const highlightNodes = async (ids: string[], duration = 1000) => {
     // Sequential highlighting to simulate data flow
@@ -409,7 +495,7 @@ export default function App() {
     }, duration);
   };
 
-  const processMessageWithAI = async (text: string) => {
+  const processMessageWithAI = async (text: string, customerContext?: any[]) => {
     await highlightNodes(['gateway', 'middleware', 'nlp-layer', 'platform-layer']);
     const apiKey = (process.env.GEMINI_API_KEY as string);
     const lowerText = text.toLowerCase();
@@ -450,24 +536,23 @@ export default function App() {
       1. TRACKING: Provide detailed order status, delivery estimates, and tracking links.
       2. PROMOTION: Offer exclusive discounts, coupon codes, and seasonal deals.
       3. SALES: Facilitate product discovery, cart management, and seamless checkout.
+      4. CRM SYNC: You have access to the customer database. If the user identifies themselves or provides new info, update the CRM.
+      
+      CRM CONTEXT (Current Customers):
+      ${JSON.stringify(customerContext || [])}
       
       Intents: TRACKING, SALES, PROMOTION, CATALOG, CHATBOT_FLOW, HUMAN_HANDOFF, PRODUCT_UPDATE, DELIVERY_STATUS, GENERAL.
       
-      Inventory Context: We have 1000 items from brands like TechNova, EcoStyle, LuxeGear, SwiftRun, PureSound.
-      Categories: Electronics, Apparel, Home, Sports, Audio.
-      
       Rules:
-      - ALWAYS be professional, helpful, and use emojis to feel like a modern WhatsApp bot.
-      - Discovery: If user wants to "Browse Catalog" or see products, use CATALOG intent. Suggest categories.
-      - Selection: If user asks for "Details" of a specific product ID (e.g. 1005), use SALES intent and include the ID as "1005".
-      - Purchase: If user says "Add to Cart" or "Buy [Product]", use SALES intent.
-      - Checkout: If user says "Checkout" or "Ready to pay", use SALES intent.
-      - Tracking: If user asks for "Delivery Status" or "Track Order", use TRACKING intent.
-      - Promotion: If user asks for "Offers", "Discounts", or "Coupons", use PROMOTION intent.
-      - If user provides contact info (email/phone), flag it for CRM.
-      - If the user's intent is unclear, offer a menu: Browse Catalog, Track Order, Special Offers, View Cart.
+      - ALWAYS be professional, helpful, and use emojis.
+      - RECOGNITION: If the user's name or email matches a customer in the context, greet them personally (e.g., "Welcome back, Alex!"). Mention their loyalty tier if relevant.
+      - TWO-WAY SYNC: If the user provides a new name, email, or phone, or updates their info, include a "crmUpdate" object in your response.
+      - Discovery: Use CATALOG intent for browsing.
+      - Selection: Use SALES intent for product details (include productId).
+      - Purchase/Checkout: Use SALES intent.
+      - Tracking: Use TRACKING intent.
       
-      Return JSON: { "intent": "...", "reply": "...", "suggestedActions": [...], "crmUpdate": { "name": "...", "email": "..." }, "productId": "..." }
+      Return JSON: { "intent": "...", "reply": "...", "suggestedActions": [...], "crmUpdate": { "name": "...", "email": "...", "phone": "..." }, "productId": "..." }
     `;
 
     try {
@@ -484,6 +569,18 @@ export default function App() {
     } catch (error) {
       console.error("Gemini Error:", error);
       return { intent: "GENERAL", reply: "I'm having a bit of trouble processing that. 😅", suggestedActions: ["Main Menu"] };
+    }
+  };
+
+  const syncCrm = async () => {
+    try {
+      const res = await fetch('/api/admin/sync', { method: 'POST' });
+      const data = await res.json();
+      if (data.success) {
+        fetchAdminData();
+      }
+    } catch (e) {
+      console.error(e);
     }
   };
 
@@ -566,7 +663,7 @@ export default function App() {
 
     try {
       // 1. Process with AI on Frontend
-      const botResponse = await processMessageWithAI(userMsg);
+      const botResponse = await processMessageWithAI(userMsg, adminData.customers);
 
       // 2. Send to Backend for Business Logic
       const response = await fetch('/api/webhook', {
@@ -600,7 +697,8 @@ export default function App() {
         text: data.reply, 
         sender: 'bot', 
         timestamp: new Date(),
-        actions: data.suggestedActions
+        actions: data.suggestedActions,
+        productId: data.productId
       }]);
       
       // Highlight the track based on intent
@@ -950,102 +1048,200 @@ export default function App() {
             initial={{ x: '100%' }}
             animate={{ x: 0 }}
             exit={{ x: '100%' }}
-            className="fixed top-20 right-0 bottom-16 w-full md:w-[400px] bg-[#e5ddd5] z-[60] shadow-2xl flex flex-col rounded-l-2xl overflow-hidden"
+            className={`fixed top-0 right-0 bottom-0 ${isMaximized ? 'w-full md:w-[800px]' : 'w-full md:w-[500px]'} bg-[#efeae2] z-[70] shadow-2xl flex flex-col overflow-hidden border-l border-gray-200 transition-all duration-500`}
           >
             {/* WhatsApp Header */}
-            <div className="bg-[#075e54] p-4 flex items-center justify-between text-white">
+            <div className="bg-[#075e54] p-4 flex items-center justify-between text-white shadow-md z-10">
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 bg-white/20 rounded-full flex items-center justify-center">
-                  <Bot className="w-6 h-6" />
+                <button 
+                  onClick={() => setShowChat(false)}
+                  className="p-1 hover:bg-white/10 rounded-full md:hidden"
+                >
+                  <ChevronRight className="w-6 h-6 rotate-180" />
+                </button>
+                <div className="relative">
+                  <div className="w-12 h-12 bg-white/20 rounded-full flex items-center justify-center border-2 border-white/30">
+                    <Bot className="w-7 h-7" />
+                  </div>
+                  <div className="absolute bottom-0 right-0 w-3 h-3 bg-emerald-500 border-2 border-[#075e54] rounded-full" />
                 </div>
                 <div>
-                  <h3 className="font-bold text-sm">Automation Assistant</h3>
-                  <p className="text-[10px] opacity-70">Online</p>
+                  <h3 className="font-black text-base leading-tight">Automation Assistant</h3>
+                  <div className="flex items-center gap-1.5">
+                    <span className="w-1.5 h-1.5 bg-emerald-400 rounded-full animate-pulse" />
+                    <p className="text-[10px] font-bold uppercase tracking-widest opacity-80">Online & Syncing</p>
+                  </div>
                 </div>
               </div>
-              {currentSystemNode && (
-                <motion.div 
-                  initial={{ opacity: 0, scale: 0.8 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  className="bg-emerald-500/20 border border-emerald-500/50 px-2 py-1 rounded flex items-center gap-2"
-                >
-                  <Activity className="w-3 h-3 text-emerald-400 animate-pulse" />
-                  <span className="text-[8px] font-black uppercase tracking-tighter text-emerald-400">
-                    {NODES.find(n => n.id === currentSystemNode)?.title.split(' ')[0]} Active
-                  </span>
-                </motion.div>
-              )}
+              <div className="flex items-center gap-2 sm:gap-4">
+                {currentSystemNode && (
+                  <motion.div 
+                    initial={{ opacity: 0, scale: 0.8 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    className="hidden lg:flex bg-emerald-500/20 border border-emerald-500/50 px-2 py-1 rounded items-center gap-2"
+                  >
+                    <Activity className="w-3 h-3 text-emerald-400 animate-pulse" />
+                    <span className="text-[8px] font-black uppercase tracking-tighter text-emerald-400">
+                      {NODES.find(n => n.id === currentSystemNode)?.title.split(' ')[0]} Active
+                    </span>
+                  </motion.div>
+                )}
+                <div className="flex items-center gap-1">
+                  <button className="p-2 hover:bg-white/10 rounded-full transition-colors hidden sm:block">
+                    <Search className="w-5 h-5" />
+                  </button>
+                  <button 
+                    onClick={() => setIsMaximized(!isMaximized)}
+                    className="p-2 hover:bg-white/10 rounded-full transition-colors hidden md:block"
+                  >
+                    {isMaximized ? <Minimize2 className="w-5 h-5" /> : <Maximize2 className="w-5 h-5" />}
+                  </button>
+                  <button className="p-2 hover:bg-white/10 rounded-full transition-colors">
+                    <MoreVertical className="w-5 h-5" />
+                  </button>
+                  <button 
+                    onClick={() => setShowChat(false)}
+                    className="p-2 hover:bg-white/10 rounded-full transition-colors ml-2"
+                  >
+                    <X className="w-6 h-6" />
+                  </button>
+                </div>
+              </div>
             </div>
 
             {/* Chat Area */}
-            <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-[url('https://user-images.githubusercontent.com/15075759/28719144-86dc0f70-73b1-11e7-911d-60d70fcded21.png')] bg-repeat">
-              {messages.map((msg, i) => (
-                <div key={i} className="space-y-2">
-                  <div className={`flex ${msg.sender === 'user' ? 'justify-end' : 'justify-start'}`}>
-                    <div className={`max-w-[80%] p-3 rounded-lg text-sm shadow-sm relative ${msg.sender === 'user' ? 'bg-[#dcf8c6] rounded-tr-none' : 'bg-white rounded-tl-none'}`}>
-                      <p className="whitespace-pre-wrap">{msg.text}</p>
-                      <span className="text-[9px] text-gray-400 block mt-1 text-right">
-                        {msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                      </span>
-                    </div>
-                  </div>
-                  
-                  {msg.sender === 'bot' && msg.actions && i === messages.length - 1 && (
-                    <div className="flex flex-wrap gap-2 justify-start pl-2">
-                      {msg.actions.map((action, j) => (
-                        <button
-                          key={j}
-                          onClick={() => handleSendMessage(action)}
-                          className="px-4 py-2 bg-white border border-emerald-100 text-emerald-700 text-xs font-bold rounded-full shadow-sm hover:bg-emerald-50 transition-colors"
+            <div className="flex-1 overflow-y-auto p-6 space-y-4 bg-[#efeae2] relative">
+              {/* WhatsApp-style Background Pattern Overlay */}
+              <div className="absolute inset-0 opacity-[0.06] pointer-events-none bg-[url('https://user-images.githubusercontent.com/15075759/28719144-86dc0f70-73b1-11e7-911d-60d70fcded21.png')] bg-repeat" />
+              
+              <div className="relative z-10 space-y-4">
+                <div className="flex justify-center mb-6">
+                  <span className="px-3 py-1 bg-white/50 backdrop-blur-sm text-[10px] font-bold text-gray-500 rounded-lg uppercase tracking-widest shadow-sm">
+                    Today
+                  </span>
+                </div>
+
+                {messages.map((msg, i) => (
+                  <div key={i} className="space-y-3">
+                    <div className={`flex ${msg.sender === 'user' ? 'justify-end' : 'justify-start'}`}>
+                      <div className="flex flex-col gap-1 max-w-[85%]">
+                        <motion.div 
+                          initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                          animate={{ opacity: 1, y: 0, scale: 1 }}
+                          className={`p-4 rounded-2xl text-sm shadow-md relative group ${
+                            msg.sender === 'user' 
+                              ? 'bg-[#dcf8c6] rounded-tr-none text-gray-800' 
+                              : 'bg-white rounded-tl-none text-gray-800'
+                          }`}
                         >
-                          {action}
-                        </button>
-                      ))}
+                          {/* Message Tail */}
+                          <div className={`absolute top-0 w-4 h-4 ${
+                            msg.sender === 'user' 
+                              ? '-right-2 bg-[#dcf8c6] [clip-path:polygon(0_0,0_100%,100%_0)]' 
+                              : '-left-2 bg-white [clip-path:polygon(100%_0,100%_100%,0_0)]'
+                          }`} />
+                          
+                          <p className="whitespace-pre-wrap leading-relaxed font-medium">{msg.text}</p>
+                          <div className="flex items-center justify-end gap-1 mt-1.5">
+                            <span className="text-[9px] text-gray-400 font-bold">
+                              {msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                            </span>
+                            {msg.sender === 'user' && (
+                              <div className="flex -space-x-1">
+                                <CheckCheck className="w-3 h-3 text-blue-500" />
+                              </div>
+                            )}
+                          </div>
+                        </motion.div>
+                        
+                        {msg.productId && (
+                          <ProductCard productId={msg.productId} />
+                        )}
+                      </div>
                     </div>
-                  )}
-                </div>
-              ))}
-              {isTyping && (
-                <div className="flex flex-col items-start gap-1">
-                  <div className="bg-white p-3 rounded-lg rounded-tl-none shadow-sm">
-                    <div className="flex gap-1">
-                      <div className="w-1.5 h-1.5 bg-gray-300 rounded-full animate-bounce" />
-                      <div className="w-1.5 h-1.5 bg-gray-300 rounded-full animate-bounce [animation-delay:0.2s]" />
-                      <div className="w-1.5 h-1.5 bg-gray-300 rounded-full animate-bounce [animation-delay:0.4s]" />
-                    </div>
+                    
+                    {msg.sender === 'bot' && msg.actions && i === messages.length - 1 && (
+                      <div className="flex flex-wrap gap-2 justify-start pl-2">
+                        {msg.actions.map((action, j) => (
+                          <motion.button
+                            key={j}
+                            initial={{ opacity: 0, x: -10 }}
+                            animate={{ opacity: 1, x: 0 }}
+                            transition={{ delay: j * 0.1 }}
+                            onClick={() => handleSendMessage(action)}
+                            className="px-5 py-2.5 bg-white border border-emerald-100 text-emerald-700 text-xs font-black rounded-xl shadow-sm hover:bg-emerald-50 hover:scale-105 transition-all active:scale-95 flex items-center gap-2"
+                          >
+                            <div className="w-1 h-1 rounded-full bg-emerald-500" />
+                            {action}
+                          </motion.button>
+                        ))}
+                      </div>
+                    )}
                   </div>
-                  {currentSystemNode && (
-                    <span className="text-[8px] text-gray-400 font-bold uppercase tracking-widest pl-1">
-                      Processing via {NODES.find(n => n.id === currentSystemNode)?.title}...
-                    </span>
-                  )}
-                </div>
-              )}
+                ))}
+                
+                {isTyping && (
+                  <div className="flex flex-col items-start gap-2">
+                    <div className="bg-white p-4 rounded-2xl rounded-tl-none shadow-md relative">
+                      <div className={`absolute top-0 -left-2 w-4 h-4 bg-white [clip-path:polygon(100%_0,100%_100%,0_0)]`} />
+                      <div className="flex gap-1.5">
+                        <div className="w-2 h-2 bg-emerald-500 rounded-full animate-bounce" />
+                        <div className="w-2 h-2 bg-emerald-500 rounded-full animate-bounce [animation-delay:0.2s]" />
+                        <div className="w-2 h-2 bg-emerald-500 rounded-full animate-bounce [animation-delay:0.4s]" />
+                      </div>
+                    </div>
+                    {currentSystemNode && (
+                      <span className="text-[9px] text-gray-400 font-black uppercase tracking-widest pl-1 flex items-center gap-2">
+                        <Activity className="w-3 h-3 animate-pulse" />
+                        Processing via {NODES.find(n => n.id === currentSystemNode)?.title}...
+                      </span>
+                    )}
+                  </div>
+                )}
+                <div ref={messagesEndRef} />
+              </div>
             </div>
 
             {/* Input Area */}
-            <form 
-              onSubmit={(e) => {
-                e.preventDefault();
-                handleSendMessage(inputValue);
-              }} 
-              className="p-3 pb-6 bg-[#f0f0f0] flex items-center gap-2"
-            >
-              <input 
-                type="text"
-                value={inputValue}
-                onChange={(e) => setInputValue(e.target.value)}
-                placeholder="Type a message..."
-                className="flex-1 bg-white p-2 px-4 rounded-full text-sm focus:outline-none"
-              />
-              <button 
-                type="submit"
-                disabled={!inputValue.trim() || isTyping}
-                className="w-10 h-10 bg-[#075e54] text-white rounded-full flex items-center justify-center disabled:opacity-50"
+            <div className="p-4 bg-[#f0f2f5] border-t border-gray-200">
+              <form 
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  handleSendMessage(inputValue);
+                }} 
+                className="flex items-center gap-3"
               >
-                <ChevronRight className="w-6 h-6" />
-              </button>
-            </form>
+                <div className="flex items-center gap-2 text-gray-500">
+                  <button type="button" className="p-2 hover:bg-gray-200 rounded-full transition-colors">
+                    <Plus className="w-6 h-6" />
+                  </button>
+                </div>
+                <div className="flex-1 relative">
+                  <input 
+                    type="text"
+                    value={inputValue}
+                    onChange={(e) => setInputValue(e.target.value)}
+                    placeholder="Type a message..."
+                    className="w-full bg-white py-3 px-5 pr-12 rounded-2xl text-sm focus:outline-none shadow-sm border border-transparent focus:border-emerald-500 transition-all"
+                  />
+                  <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-2 text-gray-400">
+                    <Smile className="w-5 h-5 cursor-pointer hover:text-gray-600" />
+                    <Paperclip className="w-5 h-5 cursor-pointer hover:text-gray-600 hidden sm:block" />
+                  </div>
+                </div>
+                <button 
+                  type="submit"
+                  disabled={!inputValue.trim() || isTyping}
+                  className={`w-12 h-12 rounded-full flex items-center justify-center shadow-lg transition-all ${
+                    !inputValue.trim() || isTyping 
+                      ? 'bg-gray-300 text-gray-500 cursor-not-allowed' 
+                      : 'bg-[#00a884] text-white hover:bg-[#008f6f] scale-110 active:scale-95'
+                  }`}
+                >
+                  {inputValue.trim() ? <Send className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
+                </button>
+              </form>
+            </div>
           </motion.div>
         )}
       </AnimatePresence>
@@ -1076,7 +1272,46 @@ export default function App() {
                   <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Sessions</p>
                   <p className="text-2xl font-black text-indigo-900">{adminData.activeSessions}</p>
                 </div>
+                <div className="p-4 bg-gray-50 rounded-xl border border-gray-100 col-span-2">
+                  <div className="flex justify-between items-center mb-1">
+                    <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">CRM Status</p>
+                    <button 
+                      onClick={syncCrm}
+                      className="text-[9px] font-black text-indigo-600 uppercase tracking-widest hover:underline flex items-center gap-1"
+                    >
+                      <RefreshCw className="w-2 h-2" /> Sync Now
+                    </button>
+                  </div>
+                  <p className="text-sm font-black text-gray-900">{adminData.crmStatus || 'Mock Mode'}</p>
+                  <div className="flex flex-wrap gap-4 mt-2">
+                    <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Orders: <span className="text-indigo-600">{adminData.ordersCount || 0}</span></p>
+                    <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Promos: <span className="text-indigo-600">{adminData.promotionsCount || 0}</span></p>
+                    <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Customers: <span className="text-indigo-600">{adminData.customersCount || 0}</span></p>
+                  </div>
+                </div>
               </section>
+
+              {adminData.customers && adminData.customers.length > 0 && (
+                <section>
+                  <h4 className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-4">
+                    Recent Customers
+                  </h4>
+                  <div className="space-y-3">
+                    {adminData.customers.map((customer, i) => (
+                      <div key={i} className="p-3 bg-gray-50 rounded-xl border border-gray-100 flex justify-between items-center">
+                        <div>
+                          <p className="text-xs font-black text-gray-900">{customer.name}</p>
+                          <p className="text-[10px] text-gray-400">{customer.email}</p>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-[10px] font-black text-indigo-600 uppercase tracking-widest">{customer.loyaltyTier}</p>
+                          <p className="text-[10px] font-bold text-gray-400">${customer.totalSpent.toFixed(2)} spent</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              )}
 
               <section>
                 <h4 className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-4 flex items-center justify-between">
