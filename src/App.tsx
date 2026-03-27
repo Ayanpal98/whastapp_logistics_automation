@@ -422,6 +422,7 @@ export default function App() {
       // Fallback logic if API key is missing
       if (lowerText.includes("track") || lowerText.includes("ord-")) return { intent: "TRACKING", reply: "Let's track your order! 📦", suggestedActions: ["ORD-123", "ORD-456", "Main Menu"] };
       if (lowerText.includes("delivery") || lowerText.includes("status")) return { intent: "DELIVERY_STATUS", reply: "Checking your delivery status... 🚚", suggestedActions: ["ORD-123", "ORD-456", "Main Menu"] };
+      if (lowerText.includes("promo") || lowerText.includes("offer") || lowerText.includes("discount") || lowerText.includes("coupon")) return { intent: "PROMOTION", reply: "Checking for special offers... 🎁", suggestedActions: ["Special Offers", "Browse Catalog", "Main Menu"] };
       if (lowerText.includes("update") || lowerText.includes("new")) return { intent: "PRODUCT_UPDATE", reply: "Here are the latest product updates! 🔔", suggestedActions: ["Notify Me", "Pre-order Solar", "Main Menu"] };
       
       if (lowerText.includes("details") && productId) return { intent: "SALES", productId, reply: `Fetching details for ${productId}...`, suggestedActions: [`Add to Cart ${idMatch![1]}`, "Back to Catalog", "Main Menu"] };
@@ -445,6 +446,11 @@ export default function App() {
       You are a highly sophisticated WhatsApp Business Assistant for a major retail brand.
       Your goal is to guide users through the entire shopping journey: Discovery -> Selection -> Purchase -> Tracking.
       
+      CORE FEATURES:
+      1. TRACKING: Provide detailed order status, delivery estimates, and tracking links.
+      2. PROMOTION: Offer exclusive discounts, coupon codes, and seasonal deals.
+      3. SALES: Facilitate product discovery, cart management, and seamless checkout.
+      
       Intents: TRACKING, SALES, PROMOTION, CATALOG, CHATBOT_FLOW, HUMAN_HANDOFF, PRODUCT_UPDATE, DELIVERY_STATUS, GENERAL.
       
       Inventory Context: We have 1000 items from brands like TechNova, EcoStyle, LuxeGear, SwiftRun, PureSound.
@@ -456,9 +462,10 @@ export default function App() {
       - Selection: If user asks for "Details" of a specific product ID (e.g. 1005), use SALES intent and include the ID as "1005".
       - Purchase: If user says "Add to Cart" or "Buy [Product]", use SALES intent.
       - Checkout: If user says "Checkout" or "Ready to pay", use SALES intent.
-      - Tracking: If user asks for "Delivery Status" or "Track Order", use TRACKING/DELIVERY_STATUS intent.
+      - Tracking: If user asks for "Delivery Status" or "Track Order", use TRACKING intent.
+      - Promotion: If user asks for "Offers", "Discounts", or "Coupons", use PROMOTION intent.
       - If user provides contact info (email/phone), flag it for CRM.
-      - If the user's intent is unclear, offer a menu: Browse Catalog, Track Order, View Cart, Product Updates.
+      - If the user's intent is unclear, offer a menu: Browse Catalog, Track Order, Special Offers, View Cart.
       
       Return JSON: { "intent": "...", "reply": "...", "suggestedActions": [...], "crmUpdate": { "name": "...", "email": "..." }, "productId": "..." }
     `;

@@ -18,6 +18,7 @@ async function startServer() {
       id: "ORD-123", 
       status: "Shipped", 
       deliveryDate: "2026-03-28",
+      trackingUrl: "https://track.example.com/ORD-123",
       items: [
         { name: "TechNova Pro Max", quantity: 1 },
         { name: "PureSound Noise Cancel 2", quantity: 2 }
@@ -31,6 +32,7 @@ async function startServer() {
       id: "ORD-456", 
       status: "Out for Delivery", 
       deliveryDate: "2026-03-26",
+      trackingUrl: "https://track.example.com/ORD-456",
       items: [
         { name: "EcoStyle Solar Watch", quantity: 1 }
       ],
@@ -40,6 +42,12 @@ async function startServer() {
         { date: "2026-03-26", status: "Out for Delivery", location: "Your City" }
       ]
     },
+  ];
+
+  const promotions = [
+    { code: "WELCOME10", discount: "10% Off", description: "First order special", expiry: "2026-12-31" },
+    { code: "TECH20", discount: "20% Off", description: "Electronics flash sale", expiry: "2026-04-15" },
+    { code: "FREESHIP", discount: "Free Shipping", description: "Orders over $100", expiry: "2026-06-30" }
   ];
 
   // Generate 1000 products for testing
@@ -74,12 +82,13 @@ async function startServer() {
     // 2. NLP Layer: Use the response processed by the frontend
     const botResponse = initialBotResponse || { intent: "GENERAL", reply: "I'm processing your request...", suggestedActions: [] };
 
-    // 2.5 GLOBAL OVERRIDES (Add to Cart, View Cart, Checkout, Catalog)
+    // 2.5 GLOBAL OVERRIDES (Add to Cart, View Cart, Checkout, Catalog, Promotions)
     const lowerMsg = message.toLowerCase();
     const isAddToCart = lowerMsg.includes("add to cart") || lowerMsg.includes("buy");
     const isViewCart = lowerMsg.includes("view cart");
     const isCheckout = lowerMsg.includes("checkout") || lowerMsg.includes("pay");
     const isCatalog = lowerMsg.includes("catalog") || lowerMsg.includes("browse") || categories.some(c => lowerMsg.includes(c.toLowerCase()));
+    const isPromotion = lowerMsg.includes("promo") || lowerMsg.includes("offer") || lowerMsg.includes("discount") || lowerMsg.includes("coupon");
 
     if (isAddToCart) {
       const idMatch = message.match(/PROD-(\d+)/i) || message.match(/(?:buy|add).*?(\d+)/i);
@@ -128,10 +137,20 @@ async function startServer() {
       botResponse.reply = "🚀 *Ready to Checkout?*\n\nPlease confirm your order details above. Once confirmed, we'll prepare your items for delivery! 📦";
       botResponse.suggestedActions = ["Confirm Checkout", "View Cart", "Main Menu"];
       return res.json(botResponse);
+    } else if (isPromotion) {
+      botResponse.intent = "PROMOTION";
+      let promoText = "🎁 *Exclusive Offers for You!*\n\nUse these codes at checkout to save big:\n\n";
+      promotions.forEach(p => {
+        promoText += `• *${p.code}*: ${p.discount}\n  _${p.description}_ (Expires: ${p.expiry})\n\n`;
+      });
+      promoText += "Simply type the code during checkout to apply! 💸";
+      botResponse.reply = promoText;
+      botResponse.suggestedActions = ["Browse Catalog", "View Cart", "Main Menu"];
+      return res.json(botResponse);
     } else if (lowerMsg === "main menu" || lowerMsg === "hi" || lowerMsg === "hello") {
       botResponse.intent = "GENERAL";
       botResponse.reply = "👋 *Welcome to our Automated Shopping Assistant!*\n\nI can help you browse products, add them to your cart, and track your deliveries directly here on WhatsApp.\n\nWhat would you like to do?";
-      botResponse.suggestedActions = ["Browse Catalog", "Track Order", "View Cart", "Product Updates"];
+      botResponse.suggestedActions = ["Browse Catalog", "Track Order", "Special Offers", "View Cart"];
       return res.json(botResponse);
     }
 
@@ -145,23 +164,14 @@ async function startServer() {
           const updatesText = order.updates.map(u => `• *${u.date}*: ${u.status} (${u.location})`).join('\n');
           const itemsText = (order as any).items.map((i: any) => `• ${i.name} (x${i.quantity})`).join('\n');
           
-          if (botResponse.intent === "DELIVERY_STATUS") {
-            botResponse.reply = `🚚 *Delivery Status for ${order.id}*\n\n` +
-                                `Current Status: *${order.status}*\n` +
-                                `Expected Delivery: *${order.deliveryDate}*\n\n` +
-                                `*Items in Order:*\n${itemsText}\n\n` +
-                                `*Recent Updates:*\n${updatesText}\n\n` +
-                                `We'll notify you when it's out for delivery!`;
-          } else {
-            botResponse.reply = `✅ *Order Found*\n\n` +
-                                `ID: *${order.id}*\n` +
-                                `Status: *${order.status}*\n` +
-                                `Delivery: *${order.deliveryDate}*\n\n` +
-                                `*Items in Order:*\n${itemsText}\n\n` +
-                                `*Tracking History:*\n${updatesText}\n\n` +
-                                `Need anything else?`;
-          }
-          botResponse.suggestedActions = ["Track Another", "Main Menu"];
+          botResponse.reply = `🚚 *Order Tracking: ${order.id}*\n\n` +
+                              `Current Status: *${order.status}*\n` +
+                              `Expected Delivery: *${order.deliveryDate}*\n\n` +
+                              `*Items in Order:*\n${itemsText}\n\n` +
+                              `*Tracking History:*\n${updatesText}\n\n` +
+                              `🔗 [View Detailed Map Tracking](${order.trackingUrl})`;
+          
+          botResponse.suggestedActions = ["Track Another", "Browse Catalog", "Main Menu"];
           delete sessions[sessionId];
         } else {
           botResponse.reply = `❌ I couldn't find order *${orderId}*. Please check the number or contact support.`;
@@ -169,17 +179,24 @@ async function startServer() {
         }
         return res.json(botResponse);
       } else {
-        botResponse.reply = `I'd be happy to help with your ${botResponse.intent === "DELIVERY_STATUS" ? "delivery status" : "order tracking"}! Please provide your Order ID (e.g., ORD-123). 📦`;
+        botResponse.reply = `📦 *Order Tracking*\n\nPlease provide your Order ID (e.g., ORD-123) to see your delivery status.\n\n*Recent Orders:* ORD-123, ORD-456`;
         botResponse.suggestedActions = ["ORD-123", "ORD-456", "Main Menu"];
         sessions[sessionId] = { step: 'AWAITING_ORDER_ID' };
         return res.json(botResponse);
       }
     }
 
-    // 4. Product Updates Track
-    if (botResponse.intent === "PRODUCT_UPDATE") {
-      botResponse.reply = "🔔 *Product Updates*\n\nStay tuned for our latest arrivals! Here are some upcoming releases:\n\n• *TechNova Pro Max* (Coming April 2026)\n• *EcoStyle Solar Watch* (Pre-order now!)\n• *PureSound Noise Cancel 2* (Restocking soon!)\n\nWould you like to be notified about any of these?";
-      botResponse.suggestedActions = ["Notify Me", "Pre-order Solar", "Main Menu"];
+    // 4. Promotions & Product Updates Track
+    if (botResponse.intent === "PROMOTION" || botResponse.intent === "PRODUCT_UPDATE") {
+      const isUpdate = botResponse.intent === "PRODUCT_UPDATE";
+      if (isUpdate) {
+        botResponse.reply = "🔔 *Product Updates*\n\nStay tuned for our latest arrivals! Here are some upcoming releases:\n\n• *TechNova Pro Max* (Coming April 2026)\n• *EcoStyle Solar Watch* (Pre-order now!)\n• *PureSound Noise Cancel 2* (Restocking soon!)\n\nWould you like to be notified about any of these?";
+        botResponse.suggestedActions = ["Notify Me", "Pre-order Solar", "Main Menu"];
+      } else {
+        // Handled by global override but as a fallback:
+        botResponse.reply = "🎁 *Special Offers*\n\nWe have several active promotions! Type 'Special Offers' to see all available discount codes.";
+        botResponse.suggestedActions = ["Special Offers", "Browse Catalog", "Main Menu"];
+      }
       return res.json(botResponse);
     }
 
@@ -228,8 +245,11 @@ async function startServer() {
 
       // Default Catalog Menu
       if (botResponse.intent === "CATALOG" || isCatalog) {
-        botResponse.reply = "📂 *Product Catalog*\n\nPlease select a category to browse our 1000+ items:";
-        botResponse.suggestedActions = categories.concat(["Search Brand", "Main Menu"]);
+        const featured = inventory.slice(0, 3);
+        botResponse.reply = "📂 *Product Catalog*\n\n*Featured Best Sellers:*\n" +
+                            featured.map(p => `• ${p.name} (${p.price})`).join('\n') +
+                            "\n\nSelect a category to browse our full collection:";
+        botResponse.suggestedActions = categories.concat(["Special Offers", "Main Menu"]);
         return res.json(botResponse);
       }
     }
