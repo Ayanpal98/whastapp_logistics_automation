@@ -131,7 +131,10 @@ export class GoogleSheetsService {
       });
 
       const rows = response.data.values;
-      if (!rows || rows.length === 0) return MOCK_ORDERS;
+      if (!rows || rows.length === 0) {
+        console.log("[INFO] No orders found in Google Sheets, using mock data.");
+        return MOCK_ORDERS;
+      }
 
       return rows.map((row: any) => ({
         id: row[0],
@@ -142,7 +145,7 @@ export class GoogleSheetsService {
         updates: JSON.parse(row[5] || '[]'),
       }));
     } catch (error) {
-      console.error("Error fetching from Google Sheets:", error);
+      console.error("[ERROR] Failed to fetch orders from Google Sheets:", error);
       return MOCK_ORDERS;
     }
   }
@@ -160,7 +163,10 @@ export class GoogleSheetsService {
       });
 
       const rows = response.data.values;
-      if (!rows || rows.length === 0) return MOCK_PROMOTIONS;
+      if (!rows || rows.length === 0) {
+        console.log("[INFO] No promotions found in Google Sheets, using mock data.");
+        return MOCK_PROMOTIONS;
+      }
 
       return rows.map((row: any) => ({
         code: row[0],
@@ -169,7 +175,7 @@ export class GoogleSheetsService {
         expiry: row[3],
       }));
     } catch (error) {
-      console.error("Error fetching from Google Sheets:", error);
+      console.error("[ERROR] Failed to fetch promotions from Google Sheets:", error);
       return MOCK_PROMOTIONS;
     }
   }
@@ -187,7 +193,10 @@ export class GoogleSheetsService {
       });
 
       const rows = response.data.values;
-      if (!rows || rows.length === 0) return MOCK_CUSTOMERS;
+      if (!rows || rows.length === 0) {
+        console.log("[INFO] No customers found in Google Sheets, using mock data.");
+        return MOCK_CUSTOMERS;
+      }
 
       return rows.map((row: any) => ({
         id: row[0],
@@ -199,7 +208,7 @@ export class GoogleSheetsService {
         loyaltyTier: row[6],
       }));
     } catch (error) {
-      console.error("Error fetching from Google Sheets:", error);
+      console.error("[ERROR] Failed to fetch customers from Google Sheets:", error);
       return MOCK_CUSTOMERS;
     }
   }

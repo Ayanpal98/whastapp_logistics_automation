@@ -3,8 +3,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, Component, ErrorInfo, ReactNode } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
+import { Toaster, toast } from 'sonner';
+import { logger } from './lib/logger';
 import { 
   MessageSquare, 
   Settings, 
@@ -435,6 +437,66 @@ const ProductCard = ({ productId }: { productId: string }) => {
   );
 };
 
+// --- Error Boundary ---
+
+interface ErrorBoundaryProps {
+  children: ReactNode;
+}
+
+interface ErrorBoundaryState {
+  hasError: boolean;
+  error: Error | null;
+}
+
+class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
+  public state: ErrorBoundaryState;
+  public props: ErrorBoundaryProps;
+
+  constructor(props: ErrorBoundaryProps) {
+    super(props);
+    this.state = { hasError: false, error: null };
+    this.props = props;
+  }
+
+  static getDerivedStateFromError(error: Error): ErrorBoundaryState {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error: Error, errorInfo: ErrorInfo) {
+    logger.critical('ErrorBoundary', 'Uncaught component error', { error, errorInfo });
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
+          <div className="max-w-md w-full bg-white rounded-2xl shadow-xl p-8 text-center border border-red-100">
+            <div className="w-16 h-16 bg-red-50 text-red-600 rounded-full flex items-center justify-center mx-auto mb-6">
+              <Activity className="w-8 h-8" />
+            </div>
+            <h1 className="text-2xl font-black text-gray-900 mb-4 tracking-tight uppercase">SYSTEM ERROR</h1>
+            <p className="text-gray-600 mb-8 font-medium leading-relaxed">
+              The application encountered a critical error. Our team has been notified.
+            </p>
+            <div className="bg-red-50 rounded-xl p-4 mb-8 text-left">
+              <p className="text-[10px] font-black text-red-400 uppercase tracking-widest mb-1">Error Log</p>
+              <p className="text-xs font-mono text-red-700 break-all">{this.state.error?.message || "Unknown error"}</p>
+            </div>
+            <button 
+              onClick={() => window.location.reload()}
+              className="w-full py-4 bg-gray-900 text-white rounded-xl font-black uppercase tracking-widest hover:bg-black transition-all shadow-lg shadow-gray-200"
+            >
+              Reload Application
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    return this.props.children;
+  }
+}
+
 export default function App() {
   const [selectedNode, setSelectedNode] = useState<NodeData | null>(null);
   const [activeTrack, setActiveTrack] = useState<Track>('all');
@@ -496,66 +558,67 @@ export default function App() {
   };
 
   const processMessageWithAI = async (text: string, customerContext?: any[]) => {
-    await highlightNodes(['gateway', 'middleware', 'nlp-layer', 'platform-layer']);
-    const apiKey = (process.env.GEMINI_API_KEY as string);
-    const lowerText = text.toLowerCase();
-    
-    // Improved product ID extraction (looking for PROD-XXXX or 4-digit numbers)
-    const idMatch = text.match(/PROD-(\d{4})/i) || text.match(/\b(10\d{2})\b/);
-    const productId = idMatch ? `PROD-${idMatch[1]}` : null;
-
-    if (!apiKey || apiKey === "MY_GEMINI_API_KEY") {
-      // Fallback logic if API key is missing
-      if (lowerText.includes("track") || lowerText.includes("ord-")) return { intent: "TRACKING", reply: "Let's track your order! 📦", suggestedActions: ["ORD-123", "ORD-456", "Main Menu"] };
-      if (lowerText.includes("delivery") || lowerText.includes("status")) return { intent: "DELIVERY_STATUS", reply: "Checking your delivery status... 🚚", suggestedActions: ["ORD-123", "ORD-456", "Main Menu"] };
-      if (lowerText.includes("promo") || lowerText.includes("offer") || lowerText.includes("discount") || lowerText.includes("coupon")) return { intent: "PROMOTION", reply: "Checking for special offers... 🎁", suggestedActions: ["Special Offers", "Browse Catalog", "Main Menu"] };
-      if (lowerText.includes("update") || lowerText.includes("new")) return { intent: "PRODUCT_UPDATE", reply: "Here are the latest product updates! 🔔", suggestedActions: ["Notify Me", "Pre-order Solar", "Main Menu"] };
-      
-      if (lowerText.includes("details") && productId) return { intent: "SALES", productId, reply: `Fetching details for ${productId}...`, suggestedActions: [`Add to Cart ${idMatch![1]}`, "Back to Catalog", "Main Menu"] };
-      if ((lowerText.includes("add to cart") || lowerText.includes("buy")) && productId) return { intent: "SALES", productId, reply: `Adding ${productId} to cart...`, suggestedActions: ["View Cart", "Checkout", "Main Menu"] };
-      
-      if (lowerText.includes("catalog") || lowerText.includes("browse") || lowerText.includes("product")) return { intent: "CATALOG", reply: "Browsing our catalog... 📂", suggestedActions: ["Electronics", "Apparel", "Home", "Main Menu"] };
-      if (lowerText.includes("add to cart") || lowerText.includes("buy")) return { intent: "SALES", reply: "Adding to cart...", suggestedActions: ["View Cart", "Checkout", "Main Menu"] };
-      if (lowerText.includes("checkout") || lowerText.includes("pay")) return { intent: "SALES", reply: "Proceeding to checkout...", suggestedActions: ["Confirm Checkout", "View Cart", "Main Menu"] };
-      
-      return { 
-        intent: "GENERAL", 
-        reply: "👋 *Welcome to our Automated Shopping Assistant!*\n\nI can help you browse products, add them to your cart, and track your deliveries directly here on WhatsApp.\n\nWhat would you like to do?",
-        suggestedActions: ["Browse Catalog", "Track Order", "View Cart", "Product Updates"]
-      };
-    }
-
-    const ai = new GoogleGenAI({ apiKey });
-    const model = "gemini-3-flash-preview";
-    
-    const systemInstruction = `
-      You are a highly sophisticated WhatsApp Business Assistant for a major retail brand.
-      Your goal is to guide users through the entire shopping journey: Discovery -> Selection -> Purchase -> Tracking.
-      
-      CORE FEATURES:
-      1. TRACKING: Provide detailed order status, delivery estimates, and tracking links.
-      2. PROMOTION: Offer exclusive discounts, coupon codes, and seasonal deals.
-      3. SALES: Facilitate product discovery, cart management, and seamless checkout.
-      4. CRM SYNC: You have access to the customer database. If the user identifies themselves or provides new info, update the CRM.
-      
-      CRM CONTEXT (Current Customers):
-      ${JSON.stringify(customerContext || [])}
-      
-      Intents: TRACKING, SALES, PROMOTION, CATALOG, CHATBOT_FLOW, HUMAN_HANDOFF, PRODUCT_UPDATE, DELIVERY_STATUS, GENERAL.
-      
-      Rules:
-      - ALWAYS be professional, helpful, and use emojis.
-      - RECOGNITION: If the user's name or email matches a customer in the context, greet them personally (e.g., "Welcome back, Alex!"). Mention their loyalty tier if relevant.
-      - TWO-WAY SYNC: If the user provides a new name, email, or phone, or updates their info, include a "crmUpdate" object in your response.
-      - Discovery: Use CATALOG intent for browsing.
-      - Selection: Use SALES intent for product details (include productId).
-      - Purchase/Checkout: Use SALES intent.
-      - Tracking: Use TRACKING intent.
-      
-      Return JSON: { "intent": "...", "reply": "...", "suggestedActions": [...], "crmUpdate": { "name": "...", "email": "...", "phone": "..." }, "productId": "..." }
-    `;
-
     try {
+      await highlightNodes(['gateway', 'middleware', 'nlp-layer', 'platform-layer']);
+      const apiKey = (process.env.GEMINI_API_KEY as string);
+      const lowerText = text.toLowerCase();
+      
+      // Improved product ID extraction (looking for PROD-XXXX or 4-digit numbers)
+      const idMatch = text.match(/PROD-(\d{4})/i) || text.match(/\b(10\d{2})\b/);
+      const productId = idMatch ? `PROD-${idMatch[1]}` : null;
+
+      if (!apiKey || apiKey === "MY_GEMINI_API_KEY") {
+        logger.warn('AI', 'Missing Gemini API Key, using fallback logic');
+        // Fallback logic if API key is missing
+        if (lowerText.includes("track") || lowerText.includes("ord-")) return { intent: "TRACKING", reply: "Let's track your order! 📦", suggestedActions: ["ORD-123", "ORD-456", "Main Menu"] };
+        if (lowerText.includes("delivery") || lowerText.includes("status")) return { intent: "DELIVERY_STATUS", reply: "Checking your delivery status... 🚚", suggestedActions: ["ORD-123", "ORD-456", "Main Menu"] };
+        if (lowerText.includes("promo") || lowerText.includes("offer") || lowerText.includes("discount") || lowerText.includes("coupon")) return { intent: "PROMOTION", reply: "Checking for special offers... 🎁", suggestedActions: ["Special Offers", "Browse Catalog", "Main Menu"] };
+        if (lowerText.includes("update") || lowerText.includes("new")) return { intent: "PRODUCT_UPDATE", reply: "Here are the latest product updates! 🔔", suggestedActions: ["Notify Me", "Pre-order Solar", "Main Menu"] };
+        
+        if (lowerText.includes("details") && productId) return { intent: "SALES", productId, reply: `Fetching details for ${productId}...`, suggestedActions: [`Add to Cart ${idMatch![1]}`, "Back to Catalog", "Main Menu"] };
+        if ((lowerText.includes("add to cart") || lowerText.includes("buy")) && productId) return { intent: "SALES", productId, reply: `Adding ${productId} to cart...`, suggestedActions: ["View Cart", "Checkout", "Main Menu"] };
+        
+        if (lowerText.includes("catalog") || lowerText.includes("browse") || lowerText.includes("product")) return { intent: "CATALOG", reply: "Browsing our catalog... 📂", suggestedActions: ["Electronics", "Apparel", "Home", "Main Menu"] };
+        if (lowerText.includes("add to cart") || lowerText.includes("buy")) return { intent: "SALES", reply: "Adding to cart...", suggestedActions: ["View Cart", "Checkout", "Main Menu"] };
+        if (lowerText.includes("checkout") || lowerText.includes("pay")) return { intent: "SALES", reply: "Proceeding to checkout...", suggestedActions: ["Confirm Checkout", "View Cart", "Main Menu"] };
+        
+        return { 
+          intent: "GENERAL", 
+          reply: "👋 *Welcome to our Automated Shopping Assistant!*\n\nI can help you browse products, add them to your cart, and track your deliveries directly here on WhatsApp.\n\nWhat would you like to do?",
+          suggestedActions: ["Browse Catalog", "Track Order", "View Cart", "Product Updates"]
+        };
+      }
+
+      const ai = new GoogleGenAI({ apiKey });
+      const model = "gemini-3-flash-preview";
+      
+      const systemInstruction = `
+        You are a highly sophisticated WhatsApp Business Assistant for a major retail brand.
+        Your goal is to guide users through the entire shopping journey: Discovery -> Selection -> Purchase -> Tracking.
+        
+        CORE FEATURES:
+        1. TRACKING: Provide detailed order status, delivery estimates, and tracking links.
+        2. PROMOTION: Offer exclusive discounts, coupon codes, and seasonal deals.
+        3. SALES: Facilitate product discovery, cart management, and seamless checkout.
+        4. CRM SYNC: You have access to the customer database. If the user identifies themselves or provides new info, update the CRM.
+        
+        CRM CONTEXT (Current Customers):
+        ${JSON.stringify(customerContext || [])}
+        
+        Intents: TRACKING, SALES, PROMOTION, CATALOG, CHATBOT_FLOW, HUMAN_HANDOFF, PRODUCT_UPDATE, DELIVERY_STATUS, GENERAL.
+        
+        Rules:
+        - ALWAYS be professional, helpful, and use emojis.
+        - RECOGNITION: If the user's name or email matches a customer in the context, greet them personally (e.g., "Welcome back, Alex!"). Mention their loyalty tier if relevant.
+        - TWO-WAY SYNC: If the user provides a new name, email, or phone, or updates their info, include a "crmUpdate" object in your response.
+        - Discovery: Use CATALOG intent for browsing.
+        - Selection: Use SALES intent for product details (include productId).
+        - Purchase/Checkout: Use SALES intent.
+        - Tracking: Use TRACKING intent.
+        
+        Return JSON: { "intent": "...", "reply": "...", "suggestedActions": [...], "crmUpdate": { "name": "...", "email": "...", "phone": "..." }, "productId": "..." }
+      `;
+
       const response = await ai.models.generateContent({
         model,
         contents: text,
@@ -565,10 +628,17 @@ export default function App() {
         },
       });
 
-      return JSON.parse(response.text || "{}");
+      const result = JSON.parse(response.text || "{}");
+      logger.info('AI', 'Message processed successfully', { intent: result.intent });
+      return result;
     } catch (error) {
-      console.error("Gemini Error:", error);
-      return { intent: "GENERAL", reply: "I'm having a bit of trouble processing that. 😅", suggestedActions: ["Main Menu"] };
+      logger.error('AI', 'Error processing message with AI', error);
+      toast.error('AI processing failed. Using fallback logic.');
+      return { 
+        intent: "GENERAL", 
+        reply: "I'm having a bit of trouble connecting to my brain right now, but I can still help you with basic tasks! 🤖",
+        suggestedActions: ["Browse Catalog", "Track Order", "Main Menu"]
+      };
     }
   };
 
@@ -642,15 +712,25 @@ export default function App() {
   };
 
   const handleCheckout = () => {
-    if (cart.length === 0) return;
-    setCart([]);
-    setMessages(prev => [...prev, { 
-      text: "🎉 *Order Placed Successfully!*\n\nThank you for your purchase. Your order is being processed and you will receive a tracking ID shortly. 🚀", 
-      sender: 'bot', 
-      timestamp: new Date(),
-      actions: ["Track Order", "Browse Catalog", "Main Menu"]
-    }]);
-    if (!showChat) setShowChat(true);
+    try {
+      if (cart.length === 0) {
+        toast.error('Your cart is empty');
+        return;
+      }
+      setCart([]);
+      setMessages(prev => [...prev, { 
+        text: "🎉 *Order Placed Successfully!*\n\nThank you for your purchase. Your order is being processed and you will receive a tracking ID shortly. 🚀", 
+        sender: 'bot', 
+        timestamp: new Date(),
+        actions: ["Track Order", "Browse Catalog", "Main Menu"]
+      }]);
+      if (!showChat) setShowChat(true);
+      toast.success('Order placed successfully!');
+      logger.info('Sales', 'Checkout completed successfully');
+    } catch (error) {
+      logger.error('Sales', 'Error during checkout', error);
+      toast.error('Checkout failed. Please try again.');
+    }
   };
 
   const handleSendMessage = async (text: string) => {
@@ -671,6 +751,11 @@ export default function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message: userMsg, sender: 'User-1', botResponse, cart })
       });
+
+      if (!response.ok) {
+        throw new Error(`Server responded with ${response.status}`);
+      }
+
       const data = await response.json();
       
       // Handle Cart Updates
@@ -686,6 +771,7 @@ export default function App() {
           }
           return [...prev, data.cartUpdate];
         });
+        toast.success('Cart updated');
       }
 
       if (userMsg.toLowerCase() === 'checkout' || userMsg.toLowerCase() === 'confirm checkout') {
@@ -718,10 +804,17 @@ export default function App() {
         setActiveTrack('all');
         await highlightNodes(['gateway', 'middleware', 'nlp-layer', 'analytics', 'platform-layer']);
       }
-
+      
+      logger.info('Chat', 'Message sent and processed', { intent: data.intent });
     } catch (error) {
-      console.error("Chat Error:", error);
-      setMessages(prev => [...prev, { text: "Sorry, I'm offline right now. 🔌", sender: 'bot', timestamp: new Date() }]);
+      logger.error('Chat', 'Error sending message', error);
+      toast.error('Failed to send message. Please check your connection.');
+      setMessages(prev => [...prev, { 
+        text: "⚠️ *System Error*\n\nI'm having trouble connecting to our servers. Please try again in a moment.", 
+        sender: 'bot', 
+        timestamp: new Date(),
+        actions: ["Retry", "Main Menu"]
+      }]);
     } finally {
       setIsTyping(false);
     }
@@ -730,7 +823,9 @@ export default function App() {
   const isHighlighted = (track: Track) => activeTrack === 'all' || activeTrack === track;
 
   return (
-    <div className="min-h-screen bg-[#f8f9fa] text-gray-900 font-sans selection:bg-indigo-100">
+    <ErrorBoundary>
+      <Toaster position="top-right" richColors closeButton />
+      <div className="min-h-screen bg-[#f8f9fa] text-gray-900 font-sans selection:bg-indigo-100">
       {/* Header */}
       <header className="fixed top-0 left-0 right-0 bg-white/80 backdrop-blur-md z-40 border-bottom border-gray-100 px-8 py-4 flex justify-between items-center">
         <div className="flex items-center gap-3">
@@ -1470,5 +1565,6 @@ export default function App() {
         </div>
       </footer>
     </div>
-  );
+  </ErrorBoundary>
+);
 }
